@@ -1,0 +1,137 @@
+/////////////////////////////////////////
+//DC Volt Meter with 3 x Led           //
+//RED GREEN BLUE LED's                 //
+//                                     //
+//For Wind Turbine / Solar Monitoring  //
+//                                     //
+//Send data to Serial also             //
+//serial data gets added to a web page //
+//locally on MAC via USB connection    //
+//usb - Serial -> web allows           //
+//remote view the voltage outputs      //
+//                                     //
+//Will add more voltage monitors       //
+//Will add arduino ethernet sheild     //
+//put unit in enclosure and can be     //
+//placed in Solar cage                 //
+//                                     //
+//Relay will be added to trigger       //
+//when Light lever drops - LDR         //
+//Using lightwaveRF unit to switch     //
+//over from mains to solar             //
+//- after charging                     //
+////////////////////////////////////////
+
+//Setup LCD, Library and Variables 
+#include <LiquidCrystal.h>             // Add Arduino LCD library
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2); //Set LCD pins on Arduino
+
+//May need to set 4.7v for Power
+//Depends on USB, 5v on my UNO on 2014 IMAC was good
+float vPow = 5;          //Set ARDUINO usb voltage
+float r1   = 20000;      //Used 2 x 10k resistors here because I didnt have a 20k
+float r2   = 10000;      //Standard 10k resistor used 
+ 
+//Setup All LED's
+int ledGreen        = 9; //Set the pin that the LED is attached to
+int ledRed          = 8; //Set the pin that the LED is attached to
+int ledBlue         = 7; //Set the pin that the LED is attached to
+int brightnessRed   = 0; //Set how bright the LED is
+int brightnessGreen = 0; //Set how bright the LED is
+int brightnessBlue  = 0; //Set how bright the LED is
+int fadeAmount      = 5; //Set how many points to fade the LED by
+
+//LDR setup
+int threshold = 25;     //Light Treshold to Trigger on resistor
+int LDR       = 1;      //LDr resistor set to arduino pin1
+int base;               //Base value for LDR
+int r;                  //LDR resistance
+ 
+ void setup() { 
+   //Setup LCD & ledGreen
+   //Print out base information and Max Volts 
+   pinMode(ledGreen, OUTPUT );                 //set ledGreen to pin 9 
+   pinMode(ledRed,   OUTPUT );                 //set ledRed to pin 8 
+   pinMode(ledBlue,  OUTPUT );                 //set ledBlue to pin 7 
+   lcd.begin(16, 2          );                 //set lcd position of characters
+   lcd.print("DC LIGHTMETER");                 //Print to the LCD
+   lcd.setCursor(0, 1       );                 //Set row0 column1 on LCD
+   lcd.print("DC VOLTMETER" );                 //Print to the LCD
+   delay(1800               );                 //Wait to see the TXT on screen
+   lcd.clear(               );                 //Clear the LCD
+   lcd.setCursor(0, 0       );                 //Set row0 column0 on LCD
+   lcd.print("Max Voltage " );                 //Print to the LCD
+   lcd.print((int)(vPow / (r2 / (r1 + r2))));  //Print the Voltage to the LCD
+   lcd.print("V"            );                 //Print to the LCD                   
+   delay(1500               );                 //Wait to see the TXT on screen
+   
+   //Set LDR
+   pinMode(LDR, INPUT);                        //Set LDR to pin 1
+   base = analogRead(LDR);                     //Read the vale from the LDR & set as a base level                     
+   
+   //setup the serial port for the web server
+   Serial.begin(9600);
+   delay(600);                                //Wait for serial to catchup
+   lcd.clear();                               //Clear the LCD so we can start outputtin on a clean display
+ }
+ 
+ void loop() {  
+   //Loop over all this code 
+   //get LDR & Voltage and dispolay on the LCD
+   //Send Voltage values to Serial also
+   r = analogRead(LDR);                        //set r (resistance) to the current value of LDR
+   analogWrite(ledGreen, brightnessGreen);     // set the brightness of pin 9 ledGreen
+   analogWrite(ledRed,     brightnessRed);     // set the brightness of pin 8 ledRed
+   analogWrite(ledBlue,   brightnessBlue);     // set the brightness of pin 8 ledRed
+  
+   //Set up the voltmeter readonut 
+   float v = (analogRead(0) * vPow) / 1024.0;  //Set v1 to inputV * arduino V / 1024
+   float v2 = v / (r2 / (r1 + r2));            //Set v2 usinf resistor values
+  
+   //Set LCD cursors depending on readouts
+   //Keeps the Text on Display even & inline
+   lcd.setCursor(0, 1 );                       //set lcd cursor position 0,1
+   if (v2 < 10) {
+    lcd.setCursor(1, 1);                       //set lcd over 1 place if voltage is less that 10 - ie: 0.00 
+   }
+   if (r > 100) {
+    lcd.setCursor(2, 1);                       //set lcd over 2 place if LDR value is 3 places, eg: 275
+   }
+   lcd.print(v2);                              //Print the current imput voltage to the screen
+   lcd.print(" volts" );                       //Print to the LCD
+   Serial.println(v2);                         //print current V to the serial for web server on MAC
+   
+   //set LED level based on voltage
+   //Display different LED levels depending on values
+   if (v2 > 1 && v2 <= 5) {                    //if voltage greater than 1 but less than 5 set the Green Led slightly bright
+     brightnessGreen = 70;                     //Set greenled to 70
+     brightnessRed   =  0;                     //Set redled to off
+   }else if (v2 >= 6 && v2 <= 10){             //If voltage is greater than 6 but less than 10
+     brightnessGreen = 200;                    //Set greenled to 200 brightness
+     brightnessRed   =   0;                    //Set redled to off
+   }else if (v2 >= 10)    {                    //If voltage is greater than 10 
+     brightnessGreen = 255;                    //Set ledgreen to fully on
+     digitalWrite(ledGreen, HIGH);             //Turn the LED on (HIGH is the voltage level) - makes it blink
+     delay(300);                               //Wait for 300 msecond
+     digitalWrite(ledGreen, LOW);              //Turn the LED off by making the voltage LOW - makes it blink
+     delay(300);                               //Wait for 300 msecond 
+     brightnessRed   =   0;                    //Set redled to off
+   }else if (v2 < 1)      {                    //if voltage is less than 1.00 set redled fully on
+     brightnessRed = 255;                      //Set led full brightness
+     digitalWrite(ledRed, HIGH);               // turn the LED on (HIGH is the voltage level)
+   }
+   
+   //calc the LDR value and light up as light drops
+   if ((base - r) > threshold) {              //if the base LDR - current is greater than treshold
+     digitalWrite(ledBlue, HIGH);             //Set ledblue fully on
+   } else {
+     digitalWrite(ledBlue, LOW);              //if treshold not triggered set ledblue to off
+   }
+   
+   //Print LDR values to lcd 0,0 position
+   lcd.setCursor(0, 0);
+   lcd.print(r);
+   lcd.print(".00");
+   lcd.print(" ohm's");
+   delay(300);
+ }
