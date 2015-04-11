@@ -1,113 +1,304 @@
-//Setup LCD, Library and Variables 
-#include <LiquidCrystal.h>             // Add Arduino LCD library
-LiquidCrystal lcd(12, 11, 5, 4, 3, 2); //Set LCD pins on Arduino
+/*
+ Created by Kevin Brannigan
+ Arduino Voltage / AMP meter with LCD, Ethernet connection and Relay controler
+ Purpose is to turn on / off devices / switch power control from solar to mains based in voltage and amps
+ Connectivity is provided via Ethernet / IP address and Displayed on LCD including Bar graph
+ Origional LCD pins //LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+*/
 
-//May need to set 4.7v for Power
-//Depends on USB, 5v on my UNO on 2014 IMAC was good
-float vPow = 5;          //Set ARDUINO usb voltage
-float r1   = 20000;      //Used 2 x 10k resistors here because I didnt have a 20k
-float r2   = 10000;      //Standard 10k resistor used 
- 
-//Setup All LED's
-int ledGreen        = 9; //Set the pin that the LED is attached to
-int ledRed          = 8; //Set the pin that the LED is attached to
-int ledBlue         = 7; //Set the pin that the LED is attached to
-int brightnessRed   = 0; //Set how bright the LED is
-int brightnessGreen = 0; //Set how bright the LED is
-int brightnessBlue  = 0; //Set how bright the LED is
-int fadeAmount      = 5; //Set how many points to fade the LED by
+#include <SPI.h>
+#include <Ethernet.h> 
+#include <LiquidCrystal.h>
+#include <LcdBarGraph.h>
 
-//LDR setup
-int threshold = 25;     //Light Treshold to Trigger on resistor
-int LDR       = 1;      //LDr resistor set to arduino pin1
-int base;               //Base value for LDR
-int r;                  //LDR resistance
- 
- void setup() { 
-   //Setup LCD & ledGreen
-   //Print out base information and Max Volts 
-   pinMode(ledGreen, OUTPUT );                 //set ledGreen to pin 9 
-   pinMode(ledRed,   OUTPUT );                 //set ledRed to pin 8 
-   pinMode(ledBlue,  OUTPUT );                 //set ledBlue to pin 7 
-   lcd.begin(16, 2          );                 //set lcd position of characters
-   lcd.print("DC LIGHTMETER");                 //Print to the LCD
-   lcd.setCursor(0, 1       );                 //Set row0 column1 on LCD
-   lcd.print("DC VOLTMETER" );                 //Print to the LCD
-   delay(1800               );                 //Wait to see the TXT on screen
-   lcd.clear(               );                 //Clear the LCD
-   lcd.setCursor(0, 0       );                 //Set row0 column0 on LCD
-   lcd.print("Max Voltage " );                 //Print to the LCD
-   lcd.print((int)(vPow / (r2 / (r1 + r2))));  //Print the Voltage to the LCD
-   lcd.print("V"            );                 //Print to the LCD                   
-   delay(1500               );                 //Wait to see the TXT on screen
-   
-   //Set LDR
-   pinMode(LDR, INPUT);                        //Set LDR to pin 1
-   base = analogRead(LDR);                     //Read the vale from the LDR & set as a base level                     
-   
-   //setup the serial port for the web server
-   Serial.begin(9600);
-   delay(600);                                //Wait for serial to catchup
-   lcd.clear();                               //Clear the LCD so we can start outputtin on a clean display
- }
- 
- void loop() {  
-   //Loop over all this code 
-   //get LDR & Voltage and dispolay on the LCD
-   //Send Voltage values to Serial also
-   r = analogRead(LDR);                        //set r (resistance) to the current value of LDR
-   analogWrite(ledGreen, brightnessGreen);     // set the brightness of pin 9 ledGreen
-   analogWrite(ledRed,     brightnessRed);     // set the brightness of pin 8 ledRed
-   analogWrite(ledBlue,   brightnessBlue);     // set the brightness of pin 8 ledRed
+
+const int numReadings = 5;    //number of units to get the average
+float readings[numReadings];  // the readings from the analog input
+
+int index     = 0;            // the index of the current reading
+float total   = 0;            // the running total
+float average = 0;            // the average
+
+//Init LCD and Graph
+LiquidCrystal lcd(26, 27, 25, 24, 23, 22);
+LcdBarGraph lbg(&lcd,6,10,1);  
+
+//Init Relays
+int MotorControl1 = 5;
+int MotorControl2 = 4;
+int MotorControl3 = 6;
+int MotorControl4 = 7;
+
+//Init Power LED
+int led = 13;
+int led1 = 28;
+int led2 = 29;
+int led3 = 30;
+int led4 = 31;
+int led5 = 32;
+
+
+//Init VOltage Divider
+float vPow = 4.795;       //Set ARDUINO usb voltage
+float r1   = 20000;       //Used 2 x 10k resistors here because I didnt have a 20k
+float r2   = 10100;       //Standard 10k resistor used  
+
+//Init Ethernet IP
+byte mac[]     = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };   //physical mac address
+byte ip[]      = { 192, 168, 1, 178 };                     // ip in lan (that's what you need to use in your browser. ("192.168.1.178")
+byte gateway[] = { 192, 168, 1, 1 };                       // internet access via router
+byte subnet[]  = { 255, 255, 255, 0 };                     //subnet mask
+EthernetServer server(80);                                 //server port     
+String readString;
+
+
+void setup() {
   
-   //Set up the voltmeter readonut 
-   float v = (analogRead(0) * vPow) / 1024.0;  //Set v1 to inputV * arduino V / 1024
-   float v2 = v / (r2 / (r1 + r2));            //Set v2 usinf resistor values
+  //Turn on Power LED
+  pinMode(led, OUTPUT);
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  pinMode(led3, OUTPUT);
+  pinMode(led4, OUTPUT);
+  pinMode(led5, OUTPUT);
+  digitalWrite(led,  LOW);   //Load 1 - first light under screen
+  digitalWrite(led1, LOW);   //Load 4 - 4th light under screen
+  digitalWrite(led2, LOW);   //Load 3 - 3rd light under screen
+  digitalWrite(led3, LOW);   //Load 2 - 2nd Light under screen
+  digitalWrite(led4, LOW);   //Ethernet light
   
-   //Set LCD cursors depending on readouts
-   //Keeps the Text on Display even & inline
-   lcd.setCursor(0, 1 );                       //set lcd cursor position 0,1
-   if (v2 < 10) {
-    lcd.setCursor(1, 1);                       //set lcd over 1 place if voltage is less that 10 - ie: 0.00 
-   }
-   if (r > 100) {
-    lcd.setCursor(2, 1);                       //set lcd over 2 place if LDR value is 3 places, eg: 275
-   }
-   lcd.print(v2);                              //Print the current imput voltage to the screen
-   lcd.print(" volts" );                       //Print to the LCD
-   Serial.println(v2);                         //print current V to the serial for web server on MAC
-   
-   //set LED level based on voltage
-   //Display different LED levels depending on values
-   if (v2 > 1 && v2 <= 5) {                    //if voltage greater than 1 but less than 5 set the Green Led slightly bright
-     brightnessGreen = 70;                     //Set greenled to 70
-     brightnessRed   =  0;                     //Set redled to off
-   }else if (v2 >= 6 && v2 <= 10){             //If voltage is greater than 6 but less than 10
-     brightnessGreen = 200;                    //Set greenled to 200 brightness
-     brightnessRed   =   0;                    //Set redled to off
-   }else if (v2 >= 10)    {                    //If voltage is greater than 10 
-     brightnessGreen = 255;                    //Set ledgreen to fully on
-     digitalWrite(ledGreen, HIGH);             //Turn the LED on (HIGH is the voltage level) - makes it blink
-     delay(300);                               //Wait for 300 msecond
-     digitalWrite(ledGreen, LOW);              //Turn the LED off by making the voltage LOW - makes it blink
-     delay(300);                               //Wait for 300 msecond 
-     brightnessRed   =   0;                    //Set redled to off
-   }else if (v2 < 1)      {                    //if voltage is less than 1.00 set redled fully on
-     brightnessRed = 255;                      //Set led full brightness
-     digitalWrite(ledRed, HIGH);               // turn the LED on (HIGH is the voltage level)
-   }
-   
-   //calc the LDR value and light up as light drops
-   if ((base - r) > threshold) {              //if the base LDR - current is greater than treshold
-     digitalWrite(ledBlue, HIGH);             //Set ledblue fully on
-   } else {
-     digitalWrite(ledBlue, LOW);              //if treshold not triggered set ledblue to off
-   }
-   
-   //Print LDR values to lcd 0,0 position
-   lcd.setCursor(0, 0);
-   lcd.print(r);
-   lcd.print(".00");
-   lcd.print(" ohm's");
-   delay(300);
- }
+  //Turn Power Light ON
+  digitalWrite(led5, HIGH);   //Power Light
+  
+  //zero the average
+  for (int thisReading = 0; thisReading < numReadings; thisReading++)
+  readings[thisReading] = 0;       
+    
+  // Startethernet
+  Ethernet.begin(mac, ip, gateway, subnet);
+  server.begin();
+  
+  //setup relay control
+  pinMode(MotorControl1, OUTPUT);
+  pinMode(MotorControl2, OUTPUT);
+  pinMode(MotorControl3, OUTPUT);
+  pinMode(MotorControl4, OUTPUT);
+  digitalWrite(MotorControl1,LOW);
+  digitalWrite(MotorControl2,LOW);
+  digitalWrite(MotorControl3,LOW);
+  digitalWrite(MotorControl4,LOW);
+  
+  // Open serial communications and wait for port to open:
+  Serial.begin(9600);
+ 
+  //Display LCD information
+  lcd.begin(16, 2);
+  lcd.setCursor(0, 0       );                 //Set row0 column0 on LCD
+  lcd.print("Max Voltage " );                 //Print to the LCD
+  lcd.print((int)(vPow / (r2 / (r1 + r2))));  //Print the Voltage to the LCD
+  lcd.print("V"            );                 //Print to the LCD                   
+  delay(2000);
+  
+  //Debuig Serial
+  Serial.println("--------------------"); 
+  Serial.print("DC Maximum Voltage: ");
+  Serial.print((int)(vPow / (r2 / (r1 + r2))));
+  Serial.println("V");
+  Serial.println("--------------------");
+  Serial.println(Ethernet.localIP());
+  Serial.println("");
+  lcd.begin(2, 16);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("IP:");
+  lcd.print(Ethernet.localIP());
+  delay(100);
+}
+
+
+void loop() {
+  
+  //do voltage calculation
+  float v = (analogRead(11) * vPow) / 1024.0;
+  float v2 = v / (r2 / (r1 + r2));
+  
+  //Do Average Calc
+  total= total - readings[index];  // subtract the last reading:       
+  readings[index] = v2;            // read from the sensor: 
+  total= total + readings[index];  // add the reading to the total:    
+  index = index + 1;               // advance to the next position in the array:                 
+  if (index >= numReadings)        // if we're at the end of the array...       
+    index = 0;                     // ...wrap around to the beginning:             
+  average = total / numReadings;     
+  
+  //print the average volts to lcd  
+  lcd.setCursor(0, 1);
+  lcd.print(average);
+  lcd.print("v ");
+  
+  //get the current battery % based on Volts
+  float volt = v2;
+  int percent = ((volt-10.50)/3.75) * 100;
+  float percent_float = ((volt-10.50)/3.75) * 100;
+  
+  //print % to LCD and bar graph
+  lcd.print(percent);
+  lcd.print("%");
+  Serial.print(percent);
+  Serial.println("%");
+  lcd.setCursor(0, 1);
+  //lbg.drawValue( analogRead(0), 2048);
+  lbg.drawValue( percent_float, 100); 
+  delay(100);
+  
+  // Create a client connection ethernet
+  EthernetClient client = server.available();
+  if (client) {
+    while (client.connected()) {   
+      if (client.available()) {
+        digitalWrite(led4, HIGH);
+        delay(2);
+        digitalWrite(led4, LOW);
+        delay(2);
+        char c = client.read();  
+        //read char by char HTTP request
+        if (readString.length() < 100) {
+          //store characters to string
+          readString += c;
+          Serial.print(c);
+          digitalWrite(led4, HIGH);
+          delay(2);
+          digitalWrite(led4, LOW);
+          delay(2);
+         }
+         //if HTTP request has ended
+         if (c == '\n') {          
+           //Serial.println(readString); //print to serial monitor for debuging
+           digitalWrite(led4, HIGH);
+           delay(2);
+           digitalWrite(led4, LOW);
+           delay(2);
+           client.println("HTTP/1.1 200 OK"); //send new page
+           client.println("Content-Type: text/html");
+           client.println();     
+           client.println("<HTML>");
+           client.println("<HEAD>");
+           client.println("<meta name='apple-mobile-web-app-capable' content='yes' />");
+           client.println("<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent' />");
+           client.println("<link rel='stylesheet' type='text/css' href='http://randomnerdtutorials.com/ethernetcss.css' />");
+           client.println("<TITLE>Arduino Web Voltage Meter</TITLE>");
+           client.println("</HEAD>");
+           client.println("<BODY>");
+           client.println("<H1>Arduino Wind-Turbine Voltage Monitor - Network Enabled</H1>");
+           client.println("<hr />");
+           client.println("<br />");  
+           client.println("<H1>Relay Controls</H1>");
+           client.println("<a href=\"/?button1on\"\"> Reset Arduino...</a>");
+           client.println("<a href=\"/?button1off\"\">Turn Off LED'S..</a><br />");   
+           client.println("<br />");    
+           client.println("<a href=\"/?button2on\"\"> Turn On  Relay 1</a>");
+           client.println("<a href=\"/?button2off\"\">Turn Off Relay 1</a><br />");  
+           client.println("<br />");    
+           client.println("<a href=\"/?button3on\"\"> Turn On  Relay 2</a>");
+           client.println("<a href=\"/?button3off\"\">Turn Off Relay 2</a><br />");  
+           client.println("<br />");    
+           client.println("<a href=\"/?button4on\"\"> Turn On  Relay 3</a>");
+           client.println("<a href=\"/?button4off\"\">Turn Off Relay 3</a><br />");  
+           client.println("<br />"); 
+           client.println("<a href=\"/?button5on\"\"> Turn On  Relay 4</a>");
+           client.println("<a href=\"/?button5off\"\">Turn Off Relay 4</a><br />");  
+           client.println("<br />"); 
+           client.println("<br />");
+           client.println("<br />"); 
+           client.println("<br />");
+           client.println("<H1>Battery Status</H1>");
+           client.println("<a href=\"/?button6on\"\">Current Volatge:</a>");
+           client.println("<H2>");
+           client.println(v2);
+           client.println("</H2>");  
+            client.println("<br />");
+           client.println("<a href=\"/?button7on\"\">Battery Charge:</a>");
+           client.println("<H1>");
+           client.println(percent);
+           client.println("%");
+           client.println("</H1>");  
+           client.println("<META HTTP-EQUIV=refresh CONTENT=8>");
+           client.println("<br />"); 
+           client.println("</BODY>");
+           client.println("</HTML>");
+           delay(1);
+           //stopping client
+           client.stop();
+           //controls the Arduino if you press the buttons
+           if (readString.indexOf("?button1on") >0){
+               digitalWrite(13, LOW);    // turn the LED on (HIGH is the voltage level)
+               delay(2000);              // wait for a second
+               digitalWrite(13, HIGH);   // turn the LED off by making the voltage LOW
+               delay(1000);              // wait for a second
+               digitalWrite(13, LOW);    // turn the LED on (HIGH is the voltage level)
+               delay(2000);              // wait for a second
+               digitalWrite(13, HIGH);   // turn the LED off by making the voltage LOW
+               delay(1000);              // wait for a second
+               software_Reset();      
+           }
+           if (readString.indexOf("?button1off") >0){
+                  digitalWrite(led,  LOW);   //Load 1 - first light under screen
+                  digitalWrite(led1, LOW);   //Load 4 - 4th light under screen
+                  digitalWrite(led2, LOW);   //Load 3 - 3rd light under screen
+                  digitalWrite(led3, LOW);   //Load 2 - 2nd Light under screen
+                  digitalWrite(led4, LOW);   //Ethernet light
+           }
+          if (readString.indexOf("?button2on") >0){
+               digitalWrite(MotorControl1,HIGH);
+               digitalWrite(led,  HIGH);
+               vPow = 4.775;
+          }
+          if (readString.indexOf("?button2off") >0){
+               digitalWrite(MotorControl1,LOW);
+               digitalWrite(led,  LOW);
+               vPow = 4.795;
+           }
+          if (readString.indexOf("?button3on") >0){
+               digitalWrite(MotorControl2,HIGH);
+               digitalWrite(led3,  HIGH);
+               vPow = 4.775;
+          }
+          if (readString.indexOf("?button3off") >0){
+               digitalWrite(MotorControl2,LOW);
+               digitalWrite(led3,  LOW);
+               vPow = 4.795;
+           }       
+          if (readString.indexOf("?button4on") >0){
+               digitalWrite(MotorControl3,HIGH);
+               digitalWrite(led2,  HIGH);
+               vPow = 4.775;
+          }
+          if (readString.indexOf("?button4off") >0){
+               digitalWrite(MotorControl3,LOW);
+               digitalWrite(led2,  LOW);
+               vPow = 4.795;
+           }       
+          if (readString.indexOf("?button5on") >0){
+               digitalWrite(MotorControl4,HIGH);
+               digitalWrite(led1,  HIGH);
+               vPow = 4.775;
+          }
+          if (readString.indexOf("?button5off") >0){
+               digitalWrite(MotorControl4,LOW);
+               digitalWrite(led1,  LOW);
+               vPow = 4.795;
+           }              
+            //clearing string for next read
+            readString="";            
+         }
+       }
+    }
+}
+Serial.println(average);
+delay(200);
+}
+
+void software_Reset() // Restarts program from beginning but does not reset the peripherals and registers
+{
+asm volatile ("  jmp 0");  
+}  
