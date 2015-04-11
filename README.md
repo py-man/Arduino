@@ -15,8 +15,11 @@ Using lightwaveRF unit to switch over from mains to solar - after charging
 
 
 --Added ethernet shield for remote monitoring and connectivity
+
 --Added relay shield for device / plug / socket control based on remote trigger or voltage levels
+
 --Attached picture of working unit
+
 --Need to attach circut diagram
 
 
