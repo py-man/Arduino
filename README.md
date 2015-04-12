@@ -3,9 +3,9 @@
 
 Arduino Sketches: 
 
-  arduino-network-voltmeter
+    arduino-network-voltmeter
 
-  auruino-pressure-ultrasound-compass
+    auruino-pressure-ultrasound-compass
 
 #[arduino-network-voltmeter]
 
