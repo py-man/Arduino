@@ -1,7 +1,11 @@
 #Arduino
 =================
 
-Arduino Sketches: arduino-network-voltmeter, auruino-pressure-ultrasound-compass
+Arduino Sketches: 
+
+arduino-network-voltmeter, 
+
+auruino-pressure-ultrasound-compass
 
 #[arduino-network-voltmeter]
 
